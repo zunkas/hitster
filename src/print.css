@@ -1,0 +1,49 @@
+@page { size: A4; margin: 0; }
+
+.sheet {
+  position: relative; width: 210mm; height: 297mm; overflow: hidden;
+  background: #fff; color: #000; break-after: page;
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+.sheet .grid { position: absolute; display: grid; }
+.sheet .crop { position: absolute; border-left: 0.2mm solid #000; border-top: 0.2mm solid #000; }
+.sheet .card {
+  width: 65mm; height: 65mm; padding: 5mm; overflow: hidden;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
+}
+.sheet.front .card.filled { outline: 0.15mm dashed #c8c8c8; outline-offset: -0.075mm; }
+
+.sheet .qr { width: 44mm; height: 44mm; }
+.sheet .qr svg { width: 100%; height: 100%; display: block; }
+.sheet .deck-name {
+  margin-top: 3mm; font-size: 3mm; color: #555; max-width: 55mm;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+
+.sheet .artist, .sheet .title {
+  max-width: 55mm; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
+}
+.sheet .artist { font-size: 4.2mm; font-weight: 700; }
+.sheet .year { font-size: 17mm; font-weight: 800; line-height: 1.1; margin: 2mm 0; letter-spacing: -0.03em; }
+.sheet .title { font-size: 3.8mm; font-style: italic; }
+
+.sheet .test { position: relative; }
+.sheet .crosshair { position: absolute; inset: 0; }
+.sheet .crosshair::before, .sheet .crosshair::after { content: ''; position: absolute; background: #000; }
+.sheet .crosshair::before { left: 50%; top: 10mm; bottom: 10mm; width: 0.25mm; }
+.sheet .crosshair::after { top: 50%; left: 10mm; right: 10mm; height: 0.25mm; }
+.sheet .test-label { position: absolute; top: 4mm; font-size: 4mm; font-weight: 700; }
+
+@media screen {
+  .sheets { display: flex; flex-wrap: wrap; gap: 1rem; margin-top: 1.5rem; }
+  .sheet { zoom: 0.45; box-shadow: 0 0 0 1px #444; }
+}
+
+@media print {
+  body { background: #fff; }
+  #app { padding: 0; max-width: none; }
+  .no-print { display: none !important; }
+  .sheets { display: block; }
+  .sheet { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .sheet:last-child { break-after: auto; }
+}
