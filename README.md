@@ -1,8 +1,8 @@
-# Song Timeline
+# Tunebuster
 
 A music timeline party game played with your own songs. You turn a Spotify playlist into printed cards (QR code on the front; year, artist and title on the back). During a game, one phone scans a card and plays the song on a Spotify speaker without showing what it is. Players place cards on their timelines on the table.
 
-"Song Timeline" is a placeholder name. Change it in `src/config.ts` and `index.html`.
+To rename the app, change `GAME_NAME` in `src/config.ts` and the `<title>` in `index.html`. Don't change `CARD_KEY`: printed cards depend on it.
 
 ## What you need
 
