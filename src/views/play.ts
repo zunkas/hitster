@@ -434,5 +434,7 @@ function errorMessage(e: unknown): string {
     if (e.status === 429) return 'Spotify is rate-limiting us. Wait a few seconds and try again.';
     return `Spotify error (${e.status}). Try again.`;
   }
-  return 'Network problem. Check your connection and try again.';
+  // fetch() rejects with a TypeError when the request never reached Spotify.
+  if (e instanceof TypeError) return 'Network problem. Check your connection and try again.';
+  return 'Something went wrong. Try again.';
 }

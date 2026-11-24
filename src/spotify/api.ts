@@ -37,7 +37,15 @@ async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
     const { message, reason } = spotifyErrorMessage(res.status, await res.text().catch(() => ''));
     throw new SpotifyError(res.status, reason, message, `${init.method ?? 'GET'} ${path.split('?')[0]}`);
   }
-  const text = await res.text();
+  return parseResponseBody<T>(await res.text(), init.method ?? 'GET');
+}
+
+/**
+ * Data requests (GET) must return JSON. Commands (PUT/POST: play, pause, seek…) return
+ * nothing useful, and Spotify sometimes sends a plain-text ID back, so ignore their body.
+ */
+export function parseResponseBody<T>(text: string, method: string): T {
+  if (method.toUpperCase() !== 'GET') return null as T;
   return (text ? JSON.parse(text) : null) as T;
 }
 
