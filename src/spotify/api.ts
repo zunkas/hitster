@@ -63,9 +63,10 @@ export interface Device {
   is_restricted: boolean;
 }
 
+/** All devices with an ID, including restricted ones (which reject Web API commands). */
 export async function getDevices(): Promise<Device[]> {
   const res = await call<{ devices: Device[] }>('/me/player/devices');
-  return res.devices.filter((d) => d.id && !d.is_restricted);
+  return res.devices.filter((d) => d.id);
 }
 
 export async function getTrackDuration(trackId: string): Promise<number | null> {

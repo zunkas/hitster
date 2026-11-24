@@ -97,8 +97,11 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
 
   async function loadDevices(): Promise<void> {
     deviceHint.textContent = 'Looking for speakers…';
+    let restricted: Device[];
     try {
-      devices = await getDevices();
+      const all = await getDevices();
+      devices = all.filter((d) => !d.is_restricted);
+      restricted = all.filter((d) => d.is_restricted);
     } catch (e) {
       deviceHint.textContent = errorMessage(e);
       return;
@@ -114,6 +117,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     deviceSelect.replaceChildren(
       placeholder,
       ...devices.map((d) => h('option', { value: d.id! }, `${d.name} (${d.type.toLowerCase()})`)),
+      ...restricted.map((d) => h('option', { value: d.id!, disabled: true }, `${d.name} — not controllable by Spotify`)),
     );
     const savedPresent = devices.some((d) => d.id === saved);
     deviceSelect.value = savedPresent ? saved! : '';
@@ -121,6 +125,8 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     if (savedPresent) deviceHint.textContent = '';
     else if (localStorage.getItem(PHONE_KEY))
       deviceHint.textContent = 'Spotify isn’t running on this phone. Tap 📱 This phone to open it.';
+    else if (!devices.length && restricted.length)
+      deviceHint.textContent = 'Spotify won’t let apps control the speakers it found. Use 📱 This phone and AirPlay or Bluetooth to the speaker.';
     else if (!devices.length) deviceHint.textContent = `No speakers found. ${WAKE_HINT}`;
     else if (saved) deviceHint.textContent = `Your last speaker isn’t available. Pick one, or: ${WAKE_HINT}`;
     else deviceHint.textContent = WAKE_HINT;
