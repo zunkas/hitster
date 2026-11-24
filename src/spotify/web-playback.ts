@@ -54,8 +54,10 @@ function loadSdk(): Promise<void> {
 }
 
 export interface BrowserPlayer {
-  /** Spotify Connect device ID of this browser tab. */
-  deviceId: string;
+  /** Device ID the SDK reported (may change if the SDK reconnects). */
+  readonly deviceId: string;
+  /** False after the SDK reported the player went offline. */
+  isOnline(): boolean;
   /** Must be called from a click/tap so the browser allows sound. */
   activate(): Promise<void>;
   disconnect(): void;
@@ -71,17 +73,30 @@ export async function startBrowserPlayer(name: string): Promise<BrowserPlayer> {
     },
     volume: 0.8,
   });
+  let currentId = '';
+  let online = false;
   const deviceId = await new Promise<string>((resolve, reject) => {
     const fail = (message: string) => () => reject(new Error(message));
-    player.addListener('ready', ({ device_id }) => resolve(device_id!));
+    player.addListener('ready', ({ device_id }) => {
+      currentId = device_id!;
+      online = true;
+      resolve(device_id!);
+    });
+    player.addListener('not_ready', () => {
+      online = false;
+    });
     player.addListener('initialization_error', fail('This browser can’t play Spotify. Try Chrome, Edge or Firefox.'));
     player.addListener('authentication_error', fail('Spotify rejected the login for browser playback. Log out and in again.'));
     player.addListener('account_error', fail('Spotify Premium is required to play in the browser.'));
     setTimeout(fail('Spotify’s web player didn’t start. Reload and try again.'), 15_000);
     player.connect().then((ok) => ok || reject(new Error('Spotify’s web player couldn’t connect.')));
   });
+  currentId ||= deviceId;
   return {
-    deviceId,
+    get deviceId() {
+      return currentId;
+    },
+    isOnline: () => online,
     activate: () => player.activateElement(),
     disconnect: () => player.disconnect(),
   };

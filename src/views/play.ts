@@ -65,6 +65,8 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   let devices: Device[] = [];
   let waitingForSpotifyApp = false;
   let browserPlayer: BrowserPlayer | null = null;
+  /** This browser's device ID as Spotify lists it (only set once Spotify knows about it). */
+  let browserDeviceId: string | null = null;
   let soundUnlocked = false;
   const deviceSelect = h('select', { 'aria-label': 'Speaker' });
   const deviceHint = h('p', { class: 'hint' });
@@ -87,7 +89,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   deviceSelect.addEventListener('change', () => {
     localStorage.setItem(DEVICE_KEY, deviceSelect.value);
     const picked = devices.find((d) => d.id === deviceSelect.value);
-    if (picked && picked.id === browserPlayer?.deviceId) setMode('browser');
+    if (picked && picked.id === browserDeviceId) setMode('browser');
     else if (picked && isPhone(picked)) setMode('phone');
     else setMode('other');
   });
@@ -109,20 +111,56 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     await startBrowser();
   }
 
-  async function startBrowser(): Promise<void> {
-    if (!browserPlayer) {
+  /**
+   * Start (or with `fresh`, restart) the browser player and wait until Spotify lists it
+   * as a device. Returns false if that didn't happen.
+   */
+  async function startBrowser(fresh = false): Promise<boolean> {
+    if (fresh || !browserPlayer || !browserPlayer.isOnline()) {
+      browserPlayer?.disconnect();
+      browserPlayer = null;
+      browserDeviceId = null;
       deviceHint.textContent = 'Starting the browser player…';
       try {
         browserPlayer = await startBrowserPlayer(BROWSER_NAME);
-        // If this was started by a click a moment ago, that click still counts as permission for sound.
-        if ((navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive) unlockSound();
       } catch (e) {
         deviceHint.textContent = (e as Error).message;
-        return;
+        return false;
+      }
+      const activation = (navigator as Navigator & { userActivation?: { isActive: boolean; hasBeenActive: boolean } })
+        .userActivation;
+      // A click a moment ago (or earlier on this page, when restarting) counts as permission for sound.
+      if (activation?.isActive || (soundUnlocked && activation?.hasBeenActive)) {
+        soundUnlocked = false;
+        unlockSound();
+      }
+    }
+    if (!browserDeviceId) {
+      deviceHint.textContent = 'Waiting for Spotify to list this browser as a speaker…';
+      browserDeviceId = await waitForBrowserDevice(browserPlayer);
+      if (!browserDeviceId) {
+        deviceHint.textContent = 'Spotify didn’t register this browser as a speaker. Reload the page and try again.';
+        return false;
       }
     }
     await loadDevices();
     if (!soundUnlocked) deviceHint.textContent = 'Click anywhere on this page once to allow sound.';
+    return true;
+  }
+
+  /** Poll Spotify's device list until the browser player shows up (by ID, else by name). */
+  async function waitForBrowserDevice(player: BrowserPlayer): Promise<string | null> {
+    for (let attempt = 0; attempt < 12; attempt++) {
+      try {
+        const listed = (await getDevices()).filter((d) => d.name === BROWSER_NAME);
+        const match = listed.find((d) => d.id === player.deviceId) ?? listed.find((d) => d.is_active) ?? listed[0];
+        if (match) return match.id;
+      } catch {
+        /* try again */
+      }
+      await new Promise((r) => setTimeout(r, 750));
+    }
+    return null;
   }
 
   /** Browsers only allow audio after a user gesture; the SDK needs to be told about it. */
@@ -187,17 +225,13 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
       deviceHint.textContent = errorMessage(e);
       return;
     }
-    // The browser player can take a moment to show up in Spotify's list; add it ourselves.
-    if (browserPlayer && !devices.some((d) => d.id === browserPlayer!.deviceId)) {
-      devices.unshift({ id: browserPlayer.deviceId, name: BROWSER_NAME, type: 'Computer', is_active: false, is_restricted: false });
-    }
-    // Other tabs' or sessions' browser players are dead ends; hide them.
-    devices = devices.filter((d) => d.name !== BROWSER_NAME || d.id === browserPlayer?.deviceId);
+    // Other tabs' or earlier sessions' browser players are dead ends; hide them.
+    devices = devices.filter((d) => d.name !== BROWSER_NAME || d.id === browserDeviceId);
 
     let saved = localStorage.getItem(DEVICE_KEY);
     // The phone app's and browser player's device IDs change; follow them in those modes.
     const mode = getMode();
-    const followed = mode === 'phone' ? findPhone(devices) : mode === 'browser' ? devices.find((d) => d.id === browserPlayer?.deviceId) : undefined;
+    const followed = mode === 'phone' ? findPhone(devices) : mode === 'browser' ? devices.find((d) => d.id === browserDeviceId) : undefined;
     if (followed) {
       saved = followed.id;
       localStorage.setItem(DEVICE_KEY, saved!);
@@ -333,7 +367,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   }
 
   async function playCard(trackId: string): Promise<void> {
-    const deviceId = deviceSelect.value;
+    let deviceId = deviceSelect.value;
     if (!deviceId) {
       showError('Choose a speaker first, then scan the card again.');
       return;
@@ -347,7 +381,14 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
       } catch (e) {
         // Idle devices (especially a backgrounded phone app) often need to be activated first.
         if (!(e instanceof SpotifyError) || e.status !== 404) throw e;
-        await transferPlayback(deviceId);
+        if (deviceId === browserDeviceId) {
+          // The browser player dropped off Spotify's list: restart it and use its new ID.
+          setState('loading');
+          if (!(await startBrowser(true))) throw e;
+          deviceId = browserDeviceId!;
+        } else {
+          await transferPlayback(deviceId);
+        }
         await play(trackId, deviceId, position);
       }
       paused = false;
