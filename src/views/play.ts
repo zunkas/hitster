@@ -271,11 +271,13 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   );
 
   const errorMsg = h('p', {});
+  const errorDetails = h('p', { class: 'hint details' });
   const wakeBtn = h('button', { class: 'big', onclick: () => openSpotifyApp() }, '📱 Open Spotify on this phone');
   const errorSection = h(
     'section',
     { class: 'panel error' },
     errorMsg,
+    errorDetails,
     wakeBtn,
     h('button', { class: 'big primary', onclick: () => setState('scanning') }, 'Scan next card'),
   );
@@ -314,8 +316,9 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     }
   }
 
-  function showError(message: string, offerWake = false): void {
+  function showError(message: string, offerWake = false, cause?: unknown): void {
     errorMsg.textContent = message;
+    errorDetails.textContent = errorDetail(cause);
     show(wakeBtn, offerWake);
     setState('error');
   }
@@ -358,6 +361,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
       showError(
         notFound && phoneMode ? 'Spotify on this phone went to sleep. Open it, switch back, and scan the card again.' : errorMessage(e),
         notFound && phoneMode,
+        e,
       );
     }
   }
@@ -385,7 +389,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
       paused = !paused;
       pauseBtn.textContent = paused ? '▶' : '⏸';
     } catch (e) {
-      showError(errorMessage(e));
+      showError(errorMessage(e), false, e);
     }
   }
 
@@ -408,13 +412,23 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   };
 }
 
+/**
+ * Spotify's own wording, for troubleshooting. Spotify's player errors are generic
+ * ("Restriction violated" etc.) and don't name the track.
+ */
+function errorDetail(e: unknown): string {
+  if (e instanceof SpotifyError) return `Spotify said: ${e.status}${e.reason ? ` ${e.reason}` : ''} – ${e.message}`;
+  if (e instanceof Error && e.message) return `Details: ${e.message}`;
+  return '';
+}
+
 /** User-facing message. Never includes anything about the song. */
 function errorMessage(e: unknown): string {
   if (e instanceof NotLoggedInError) return 'You’ve been logged out of Spotify. Go home and log in again.';
   if (e instanceof SpotifyError) {
     if (e.status === 404) return `Speaker not found. ${WAKE_HINT}`;
     if (e.reason === 'PREMIUM_REQUIRED') return 'Spotify Premium is required to play songs.';
-    if (e.status === 403) return 'Spotify refused to play this card. The song may be unavailable in your country.';
+    if (e.status === 403) return 'Spotify refused to play this card. See Spotify’s reason below.';
     if (e.status === 400) return 'This card’s song couldn’t be played.';
     if (e.status === 429) return 'Spotify is rate-limiting us. Wait a few seconds and try again.';
     return `Spotify error (${e.status}). Try again.`;
