@@ -6,16 +6,36 @@ export class SpotifyError extends Error {
     public status: number,
     public reason: string | undefined,
     message: string,
+    /** e.g. "PUT /me/player/play", for troubleshooting. */
+    public endpoint: string,
   ) {
     super(message);
   }
 }
 
+/** Pull a readable message out of whatever Spotify sent back with an error. */
+export function spotifyErrorMessage(status: number, bodyText: string): { message: string; reason?: string } {
+  let body: unknown = null;
+  try {
+    body = JSON.parse(bodyText);
+  } catch {
+    /* not JSON */
+  }
+  const err = (body as { error?: unknown; error_description?: string } | null)?.error;
+  if (err && typeof err === 'object') {
+    const { message, reason } = err as { message?: string; reason?: string };
+    if (message || reason) return { message: message || '(no message)', reason };
+  }
+  if (typeof err === 'string') return { message: (body as { error_description?: string }).error_description || err };
+  const text = bodyText.trim().slice(0, 200);
+  return { message: text || `HTTP ${status} with an empty response` };
+}
+
 async function call<T>(path: string, init: RequestInit = {}): Promise<T> {
   const res = await fetchWithAuth(path, init);
   if (!res.ok) {
-    const body = await res.json().catch(() => null);
-    throw new SpotifyError(res.status, body?.error?.reason, body?.error?.message ?? res.statusText);
+    const { message, reason } = spotifyErrorMessage(res.status, await res.text().catch(() => ''));
+    throw new SpotifyError(res.status, reason, message, `${init.method ?? 'GET'} ${path.split('?')[0]}`);
   }
   const text = await res.text();
   return (text ? JSON.parse(text) : null) as T;

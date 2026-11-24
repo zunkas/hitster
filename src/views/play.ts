@@ -417,7 +417,8 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
  * ("Restriction violated" etc.) and don't name the track.
  */
 function errorDetail(e: unknown): string {
-  if (e instanceof SpotifyError) return `Spotify said: ${e.status}${e.reason ? ` ${e.reason}` : ''} – ${e.message}`;
+  if (e instanceof SpotifyError)
+    return `Spotify said: ${e.status}${e.reason ? ` ${e.reason}` : ''} – ${e.message} (${e.endpoint})`;
   if (e instanceof Error && e.message) return `Details: ${e.message}`;
   return '';
 }
