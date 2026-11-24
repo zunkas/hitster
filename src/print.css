@@ -12,6 +12,8 @@
   display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;
 }
 .sheet.front .card.filled { outline: 0.15mm dashed #c8c8c8; outline-offset: -0.075mm; }
+/* Deck color stripe along the top edge: a long-edge flip keeps it at the top on both sides. */
+.sheet .card.filled:not(.test) { border-top: 4mm solid var(--deck-color, transparent); padding: 3mm 5mm 4mm; }
 
 .sheet .qr { width: 44mm; height: 44mm; }
 .sheet .qr svg { width: 100%; height: 100%; display: block; }
@@ -23,7 +25,7 @@
 .sheet .artist, .sheet .title {
   max-width: 55mm; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; overflow: hidden;
 }
-.sheet .artist { font-size: 4.2mm; font-weight: 700; }
+.sheet .artist { font-size: 4.2mm; font-weight: 700; -webkit-line-clamp: 2; }
 .sheet .year { font-size: 17mm; font-weight: 800; line-height: 1.1; margin: 2mm 0; letter-spacing: -0.03em; }
 .sheet .title { font-size: 3.8mm; font-style: italic; }
 

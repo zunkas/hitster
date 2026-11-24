@@ -5,6 +5,10 @@ export interface Card {
   year: number | null;
   /** Why the year might be wrong, or null if the track looks fine. */
   suspicious: string | null;
+  /** Set by applyYearOverrides when the host corrected the year. */
+  yearEdited?: boolean;
+  /** Spotify's year, kept when the year was corrected. */
+  spotifyYear?: number | null;
 }
 
 /** The subset of a Spotify track object we use. */
@@ -62,4 +66,54 @@ export function playlistIdFromInput(input: string): string | null {
     /^spotify:playlist:([A-Za-z0-9]+)$/.exec(s) ??
     /^([A-Za-z0-9]{22})$/.exec(s);
   return m ? m[1] : null;
+}
+
+export type YearOverrides = Record<string, number>;
+
+/** Apply the host's year corrections (keyed by track ID, shared across decks). */
+export function applyYearOverrides(cards: Card[], overrides: YearOverrides): Card[] {
+  return cards.map((c) => {
+    const year = overrides[c.trackId];
+    return year == null ? c : { ...c, year, yearEdited: true, spotifyYear: c.year };
+  });
+}
+
+/** True if the card is worth a look: flagged or missing a year, and not already corrected. */
+export function needsAttention(card: Card): boolean {
+  return !card.yearEdited && (card.suspicious != null || card.year == null);
+}
+
+export function decadeOf(year: number): number {
+  return Math.floor(year / 10) * 10;
+}
+
+export interface DecadeCount {
+  /** e.g. 1970, or null for cards without a year. */
+  decade: number | null;
+  label: string;
+  count: number;
+}
+
+/** Cards per decade from the earliest to the latest decade (empty decades included), then Unknown. */
+export function decadeCounts(cards: Card[]): DecadeCount[] {
+  const counts = new Map<number, number>();
+  let unknown = 0;
+  for (const c of cards) {
+    if (c.year == null) unknown++;
+    else counts.set(decadeOf(c.year), (counts.get(decadeOf(c.year)) ?? 0) + 1);
+  }
+  const result: DecadeCount[] = [];
+  if (counts.size) {
+    const decades = [...counts.keys()];
+    for (let d = Math.min(...decades); d <= Math.max(...decades); d += 10) {
+      result.push({ decade: d, label: `${d}s`, count: counts.get(d) ?? 0 });
+    }
+  }
+  if (unknown) result.push({ decade: null, label: 'Unknown', count: unknown });
+  return result;
+}
+
+/** Oldest first; cards without a year last. Stable for equal years. */
+export function sortByYear(cards: Card[]): Card[] {
+  return [...cards].sort((a, b) => (a.year ?? Infinity) - (b.year ?? Infinity));
 }

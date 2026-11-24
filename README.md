@@ -35,10 +35,11 @@ If you give the repo a different name, change the redirect URI to match. The bui
 
 1. Open the app and log in, then choose **Make a deck**.
 2. Paste a Spotify playlist link and click **Load playlist**. Use one playlist per deck. The playlist name appears on the card fronts.
-3. Check the **warning list**. Spotify reports the year of the *release*, so remasters, live versions and compilations often show the wrong year. Swap those tracks for the original release in Spotify, then reload.
-4. The first time, print the **Alignment test page** on one sheet, double-sided. Hold it up to the light and check that the crosshairs line up with the ones on the back.
-5. Click **Print**. Choose double-sided, **flip on long edge**, **100% scale / actual size** (not "fit to page"), and no headers or footers.
-6. Cut along the crop marks.
+3. Pick a **deck color**. Every card gets a stripe in that color along its top edge, so decks are easy to sort apart. There are four colors, chosen so they stay distinguishable for colorblind players too.
+4. Check the **year spread** chart and the list of cards that **may have the wrong year**. Spotify reports the year of the *release*, so remasters, live versions and compilations are often off. Type the original year straight into the table. Fixes are saved in this browser for that song, in every deck. ↺ goes back to Spotify's year. Click a decade in the chart to list all its songs, or tick **Show all songs** to edit any card.
+5. The first time, print the **Alignment test page** on one sheet, double-sided. Hold it up to the light and check that the crosshairs line up with the ones on the back.
+6. Click **Print**. Choose double-sided, **flip on long edge**, **100% scale / actual size** (not "fit to page"), and no headers or footers.
+7. Cut along the crop marks.
 
 If loading a playlist fails, Spotify may only allow development-mode apps to read playlists you own or collaborate on. In that case, copy the songs into a playlist of your own.
 

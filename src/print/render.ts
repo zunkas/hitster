@@ -47,7 +47,8 @@ function sheetElement<T>(sheet: Sheet<T>, renderSlot: (item: T, side: Sheet<T>['
   return h('section', { class: `sheet ${sheet.side}` }, ...cropMarks(), grid);
 }
 
-export async function renderDeck(cards: Card[], deckName: string): Promise<HTMLElement[]> {
+/** `color` is the deck's print color, drawn as a stripe along the top of every card. */
+export async function renderDeck(cards: Card[], deckName: string, color: string): Promise<HTMLElement[]> {
   const base = appBaseUrl();
   const qr = new Map<string, string>();
   await Promise.all(
@@ -55,7 +56,7 @@ export async function renderDeck(cards: Card[], deckName: string): Promise<HTMLE
       qr.set(c.trackId, await QRCode.toString(cardUrl(c.trackId, base), { type: 'svg', margin: 0, errorCorrectionLevel: 'M' }));
     }),
   );
-  return duplexSheets(cards).map((sheet) =>
+  const sheets = duplexSheets(cards).map((sheet) =>
     sheetElement(sheet, (card, side) => {
       if (side === 'front') {
         const code = h('div', { class: 'qr' });
@@ -71,6 +72,8 @@ export async function renderDeck(cards: Card[], deckName: string): Promise<HTMLE
       );
     }),
   );
+  for (const s of sheets) s.style.setProperty('--deck-color', color);
+  return sheets;
 }
 
 /** One duplex sheet with numbered crosshairs; hold it to the light to check front/back alignment. */
