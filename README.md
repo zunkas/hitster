@@ -46,6 +46,7 @@ If loading a playlist fails, Spotify may only allow development-mode apps to rea
 
 1. Wake up the speaker by starting something on it once from the Spotify app.
 2. On the host phone, open the app and choose **Play**. Pick the speaker; the app remembers it next time. If the speaker isn't listed, tap **↻**.
+   - To play through the phone itself, tap **📱 This phone**. If the Spotify app isn't running, it opens. Switch back to the browser and the phone is picked automatically. The Spotify app must be logged in with the same account. If iOS puts Spotify to sleep during a long pause, the scanner offers a button to open it again.
 3. Use **⚙** to choose where songs start: from the beginning, at a fixed offset, or at a random point. You can change this mid-game.
 4. Pass the phone around. Each player scans a card, listens, places it on their timeline, then flips it to check.
 

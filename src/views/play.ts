@@ -2,15 +2,21 @@ import QrScanner from 'qr-scanner';
 import { GAME_NAME } from '../config';
 import { h, show } from '../dom';
 import { trackIdFromScan } from '../payload';
-import { type Device, getDevices, getTrackDuration, pause, play, resume, SpotifyError } from '../spotify/api';
+import { type Device, getDevices, getTrackDuration, pause, play, resume, SpotifyError, transferPlayback } from '../spotify/api';
 import { isLoggedIn, NotLoggedInError } from '../spotify/auth';
 import { loadStartSettings, saveStartSettings, type StartMode, startPositionMs } from '../start-position';
 import { loginPrompt } from './login-prompt';
 
 const DEVICE_KEY = 'deviceId';
-const WAKE_HINT = 'Not listed? Start something on the speaker from the Spotify app once, then tap ↻.';
+/** Set when the host chose "This phone": follow the phone's Spotify app even if its device ID changes. */
+const PHONE_KEY = 'useThisPhone';
+const WAKE_HINT = 'Not listed? Start something on the speaker from the Spotify app once (or tap 📱 This phone), then tap ↻.';
 
 type State = 'scanning' | 'loading' | 'playing' | 'error';
+
+const isPhone = (d: Device) => d.type.toLowerCase() === 'smartphone';
+/** Best guess at the Spotify app on this phone: the active smartphone, else any smartphone. */
+const findPhone = (devices: Device[]) => devices.find((d) => isPhone(d) && d.is_active) ?? devices.find(isPhone);
 
 export function playView(root: HTMLElement, params: URLSearchParams): () => void {
   const header = h('header', { class: 'bar' }, h('a', { class: 'back', href: '#/' }, `← ${GAME_NAME}`));
@@ -21,21 +27,78 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   }
 
   // ---- Speaker picker ----
+  let devices: Device[] = [];
+  let waitingForSpotifyApp = false;
   const deviceSelect = h('select', { 'aria-label': 'Speaker' });
   const deviceHint = h('p', { class: 'hint' });
   const refreshBtn = h('button', { class: 'icon', title: 'Refresh speakers', onclick: () => loadDevices() }, '↻');
-  deviceSelect.addEventListener('change', () => localStorage.setItem(DEVICE_KEY, deviceSelect.value));
+  const phoneBtn = h('button', { title: 'Play through the Spotify app on this phone', onclick: () => useThisPhone() }, '📱 This phone');
+  deviceSelect.addEventListener('change', () => {
+    localStorage.setItem(DEVICE_KEY, deviceSelect.value);
+    const picked = devices.find((d) => d.id === deviceSelect.value);
+    if (picked && isPhone(picked)) localStorage.setItem(PHONE_KEY, '1');
+    else localStorage.removeItem(PHONE_KEY);
+  });
+
+  function selectDevice(d: Device): void {
+    deviceSelect.value = d.id!;
+    localStorage.setItem(DEVICE_KEY, d.id!);
+    deviceHint.textContent = '';
+  }
+
+  /** Select the Spotify app on this phone, opening it first if it isn't running. */
+  async function useThisPhone(): Promise<void> {
+    localStorage.setItem(PHONE_KEY, '1');
+    await loadDevices();
+    const phone = findPhone(devices);
+    if (phone) selectDevice(phone);
+    else openSpotifyApp();
+  }
+
+  /**
+   * Opens the Spotify app (home screen, nothing about the song) so it registers as a
+   * speaker. When the user switches back, the visibilitychange handler picks it up.
+   */
+  function openSpotifyApp(): void {
+    waitingForSpotifyApp = true;
+    deviceHint.textContent = 'Opening Spotify… then switch back here.';
+    location.href = 'spotify:';
+  }
+
+  async function onVisible(): Promise<void> {
+    if (document.visibilityState !== 'visible') return;
+    if (!scanSection.hidden) scanner.start().catch(() => {});
+    if (!waitingForSpotifyApp) return;
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await loadDevices();
+      const phone = findPhone(devices);
+      if (phone) {
+        waitingForSpotifyApp = false;
+        selectDevice(phone);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    waitingForSpotifyApp = false;
+    deviceHint.textContent = `This phone isn’t showing up. In the Spotify app, make sure you’re logged in with the same account, then tap ↻.`;
+  }
+  document.addEventListener('visibilitychange', onVisible);
 
   async function loadDevices(): Promise<void> {
     deviceHint.textContent = 'Looking for speakers…';
-    let devices: Device[];
     try {
       devices = await getDevices();
     } catch (e) {
       deviceHint.textContent = errorMessage(e);
       return;
     }
-    const saved = localStorage.getItem(DEVICE_KEY);
+    let saved = localStorage.getItem(DEVICE_KEY);
+    // The phone app's device ID can change; in "this phone" mode follow it.
+    const phone = localStorage.getItem(PHONE_KEY) ? findPhone(devices) : undefined;
+    if (phone && !devices.some((d) => d.id === saved)) {
+      saved = phone.id;
+      localStorage.setItem(DEVICE_KEY, saved!);
+    }
     const placeholder = h('option', { value: '', disabled: true }, 'Choose a speaker…');
     deviceSelect.replaceChildren(
       placeholder,
@@ -44,13 +107,12 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     const savedPresent = devices.some((d) => d.id === saved);
     deviceSelect.value = savedPresent ? saved! : '';
     if (!savedPresent) placeholder.selected = true;
-    deviceHint.textContent = !devices.length
-      ? `No speakers found. ${WAKE_HINT}`
-      : saved && !savedPresent
-        ? `Your last speaker isn’t available. Pick one, or: ${WAKE_HINT}`
-        : savedPresent
-          ? ''
-          : WAKE_HINT;
+    if (savedPresent) deviceHint.textContent = '';
+    else if (localStorage.getItem(PHONE_KEY))
+      deviceHint.textContent = 'Spotify isn’t running on this phone. Tap 📱 This phone to open it.';
+    else if (!devices.length) deviceHint.textContent = `No speakers found. ${WAKE_HINT}`;
+    else if (saved) deviceHint.textContent = `Your last speaker isn’t available. Pick one, or: ${WAKE_HINT}`;
+    else deviceHint.textContent = WAKE_HINT;
   }
 
   // ---- Start-point settings ----
@@ -98,17 +160,19 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   );
 
   const errorMsg = h('p', {});
+  const wakeBtn = h('button', { class: 'big', onclick: () => openSpotifyApp() }, '📱 Open Spotify on this phone');
   const errorSection = h(
     'section',
     { class: 'panel error' },
     errorMsg,
+    wakeBtn,
     h('button', { class: 'big primary', onclick: () => setState('scanning') }, 'Scan next card'),
   );
   const loadingSection = h('section', { class: 'loading' }, h('p', {}, 'Starting song…'));
 
   root.append(
     settingsPanel,
-    h('div', { class: 'row device' }, deviceSelect, refreshBtn),
+    h('div', { class: 'row device' }, deviceSelect, refreshBtn, phoneBtn),
     deviceHint,
     scanSection,
     loadingSection,
@@ -138,8 +202,9 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     }
   }
 
-  function showError(message: string): void {
+  function showError(message: string, offerWake = false): void {
     errorMsg.textContent = message;
+    show(wakeBtn, offerWake);
     setState('error');
   }
 
@@ -161,13 +226,26 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     setState('loading');
     try {
       const duration = settings.mode === 'start' ? null : await getTrackDuration(trackId);
-      await play(trackId, deviceId, startPositionMs(settings, duration));
+      const position = startPositionMs(settings, duration);
+      try {
+        await play(trackId, deviceId, position);
+      } catch (e) {
+        // Idle devices (especially a backgrounded phone app) often need to be activated first.
+        if (!(e instanceof SpotifyError) || e.status !== 404) throw e;
+        await transferPlayback(deviceId);
+        await play(trackId, deviceId, position);
+      }
       paused = false;
       pauseBtn.textContent = '⏸';
       setState('playing');
     } catch (e) {
-      if (e instanceof SpotifyError && e.status === 404) loadDevices();
-      showError(errorMessage(e));
+      const notFound = e instanceof SpotifyError && e.status === 404;
+      if (notFound) loadDevices();
+      const phoneMode = Boolean(localStorage.getItem(PHONE_KEY));
+      showError(
+        notFound && phoneMode ? 'Spotify on this phone went to sleep. Open it, switch back, and scan the card again.' : errorMessage(e),
+        notFound && phoneMode,
+      );
     }
   }
 
@@ -191,7 +269,10 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     else if (params.has('c')) showError('That link isn’t a valid card.');
   });
 
-  return () => scanner.destroy();
+  return () => {
+    document.removeEventListener('visibilitychange', onVisible);
+    scanner.destroy();
+  };
 }
 
 /** User-facing message. Never includes anything about the song. */

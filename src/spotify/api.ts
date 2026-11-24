@@ -85,6 +85,15 @@ export async function play(trackId: string, deviceId: string, positionMs: number
   });
 }
 
+/** Make a device the active one (wakes up idle phone apps before playing). */
+export async function transferPlayback(deviceId: string): Promise<void> {
+  await call('/me/player', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ device_ids: [deviceId], play: false }),
+  });
+}
+
 export async function pause(deviceId: string): Promise<void> {
   await call(`/me/player/pause?device_id=${encodeURIComponent(deviceId)}`, { method: 'PUT' });
 }
