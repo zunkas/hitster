@@ -6,6 +6,10 @@ const SCOPES = [
   'playlist-read-collaborative',
   'user-read-playback-state',
   'user-modify-playback-state',
+  // Needed by the Web Playback SDK (playing in a desktop browser tab).
+  'streaming',
+  'user-read-email',
+  'user-read-private',
 ].join(' ');
 
 const TOKEN_KEY = 'spotifyToken';
@@ -16,6 +20,8 @@ const RETURN_KEY = 'returnTo';
 interface StoredToken {
   access_token: string;
   refresh_token: string;
+  /** Granted scopes; missing on tokens saved by older versions of the app. */
+  scope?: string;
   expires_at: number;
 }
 
@@ -27,12 +33,13 @@ function readToken(): StoredToken | null {
   }
 }
 
-function saveToken(res: { access_token: string; refresh_token?: string; expires_in: number }): void {
+function saveToken(res: { access_token: string; refresh_token?: string; expires_in: number; scope?: string }): void {
   const prev = readToken();
   const token: StoredToken = {
     access_token: res.access_token,
     refresh_token: res.refresh_token ?? prev?.refresh_token ?? '',
     expires_at: Date.now() + res.expires_in * 1000,
+    scope: res.scope ?? prev?.scope,
   };
   localStorage.setItem(TOKEN_KEY, JSON.stringify(token));
 }
@@ -122,7 +129,13 @@ export class NotLoggedInError extends Error {
   }
 }
 
-async function accessToken(): Promise<string> {
+/** True if the current login granted all of these scopes (otherwise log in again). */
+export function hasScopes(...scopes: string[]): boolean {
+  const granted = new Set((readToken()?.scope ?? '').split(' '));
+  return scopes.every((s) => granted.has(s));
+}
+
+export async function accessToken(): Promise<string> {
   let token = readToken();
   if (!token) throw new NotLoggedInError();
   if (token.expires_at - Date.now() < 60_000) {

@@ -14,14 +14,35 @@ import {
   SpotifyError,
   transferPlayback,
 } from '../spotify/api';
-import { isLoggedIn, NotLoggedInError } from '../spotify/auth';
+import { hasScopes, isLoggedIn, login, NotLoggedInError } from '../spotify/auth';
+import { BROWSER_PLAYER_SCOPES, type BrowserPlayer, canPlayInBrowser, startBrowserPlayer } from '../spotify/web-playback';
 import { checkStartPosition, loadStartSettings, saveStartSettings, type StartMode, startPositionMs } from '../start-position';
 import { loginPrompt } from './login-prompt';
 
 const DEVICE_KEY = 'deviceId';
-/** Set when the host chose "This phone": follow the phone's Spotify app even if its device ID changes. */
-const PHONE_KEY = 'useThisPhone';
-const WAKE_HINT = 'Not listed? Start something on the speaker from the Spotify app once (or tap 📱 This phone), then tap ↻.';
+/**
+ * How the host chose a speaker. "phone" and "browser" follow this device even when
+ * its Spotify device ID changes; "other" sticks to the saved device ID.
+ */
+const MODE_KEY = 'deviceMode';
+type DeviceMode = 'phone' | 'browser' | 'other';
+
+function getMode(): DeviceMode {
+  const m = localStorage.getItem(MODE_KEY);
+  if (m === 'phone' || m === 'browser') return m;
+  return localStorage.getItem('useThisPhone') ? 'phone' : 'other'; // setting from older versions
+}
+
+function setMode(mode: DeviceMode): void {
+  localStorage.setItem(MODE_KEY, mode);
+  localStorage.removeItem('useThisPhone');
+}
+
+const DESKTOP = canPlayInBrowser();
+const BROWSER_NAME = `${GAME_NAME} (this browser)`;
+const WAKE_HINT = DESKTOP
+  ? 'Not listed? Start something on the speaker from the Spotify app once (or click 💻 This browser), then click ↻.'
+  : 'Not listed? Start something on the speaker from the Spotify app once (or tap 📱 This phone), then tap ↻.';
 
 type State = 'scanning' | 'loading' | 'playing' | 'error';
 
@@ -40,15 +61,20 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   // ---- Speaker picker ----
   let devices: Device[] = [];
   let waitingForSpotifyApp = false;
+  let browserPlayer: BrowserPlayer | null = null;
+  let soundUnlocked = false;
   const deviceSelect = h('select', { 'aria-label': 'Speaker' });
   const deviceHint = h('p', { class: 'hint' });
   const refreshBtn = h('button', { class: 'icon', title: 'Refresh speakers', onclick: () => loadDevices() }, '↻');
-  const phoneBtn = h('button', { title: 'Play through the Spotify app on this phone', onclick: () => useThisPhone() }, '📱 This phone');
+  const localBtn = DESKTOP
+    ? h('button', { title: 'Play in this browser tab', onclick: () => useThisBrowser() }, '💻 This browser')
+    : h('button', { title: 'Play through the Spotify app on this phone', onclick: () => useThisPhone() }, '📱 This phone');
   deviceSelect.addEventListener('change', () => {
     localStorage.setItem(DEVICE_KEY, deviceSelect.value);
     const picked = devices.find((d) => d.id === deviceSelect.value);
-    if (picked && isPhone(picked)) localStorage.setItem(PHONE_KEY, '1');
-    else localStorage.removeItem(PHONE_KEY);
+    if (picked && picked.id === browserPlayer?.deviceId) setMode('browser');
+    else if (picked && isPhone(picked)) setMode('phone');
+    else setMode('other');
   });
 
   function selectDevice(d: Device): void {
@@ -57,9 +83,45 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     deviceHint.textContent = '';
   }
 
+  /** Make this browser tab the speaker. Called from a click, so sound gets unlocked too. */
+  async function useThisBrowser(): Promise<void> {
+    setMode('browser');
+    if (!hasScopes(...BROWSER_PLAYER_SCOPES)) {
+      deviceHint.textContent = 'Spotify needs one more permission to play in the browser. Logging in again…';
+      await login('#/play');
+      return;
+    }
+    await startBrowser();
+  }
+
+  async function startBrowser(): Promise<void> {
+    if (!browserPlayer) {
+      deviceHint.textContent = 'Starting the browser player…';
+      try {
+        browserPlayer = await startBrowserPlayer(BROWSER_NAME);
+        // If this was started by a click a moment ago, that click still counts as permission for sound.
+        if ((navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive) unlockSound();
+      } catch (e) {
+        deviceHint.textContent = (e as Error).message;
+        return;
+      }
+    }
+    await loadDevices();
+    if (!soundUnlocked) deviceHint.textContent = 'Click anywhere on this page once to allow sound.';
+  }
+
+  /** Browsers only allow audio after a user gesture; the SDK needs to be told about it. */
+  function unlockSound(): void {
+    if (soundUnlocked || !browserPlayer) return;
+    soundUnlocked = true;
+    browserPlayer.activate().catch(() => {});
+    if (deviceHint.textContent?.startsWith('Click anywhere')) deviceHint.textContent = '';
+  }
+  document.addEventListener('pointerdown', unlockSound);
+
   /** Select the Spotify app on this phone, opening it first if it isn't running. */
   async function useThisPhone(): Promise<void> {
-    localStorage.setItem(PHONE_KEY, '1');
+    setMode('phone');
     await loadDevices();
     const phone = findPhone(devices);
     if (phone) selectDevice(phone);
@@ -106,11 +168,19 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
       deviceHint.textContent = errorMessage(e);
       return;
     }
+    // The browser player can take a moment to show up in Spotify's list; add it ourselves.
+    if (browserPlayer && !devices.some((d) => d.id === browserPlayer!.deviceId)) {
+      devices.unshift({ id: browserPlayer.deviceId, name: BROWSER_NAME, type: 'Computer', is_active: false, is_restricted: false });
+    }
+    // Other tabs' or sessions' browser players are dead ends; hide them.
+    devices = devices.filter((d) => d.name !== BROWSER_NAME || d.id === browserPlayer?.deviceId);
+
     let saved = localStorage.getItem(DEVICE_KEY);
-    // The phone app's device ID can change; in "this phone" mode follow it.
-    const phone = localStorage.getItem(PHONE_KEY) ? findPhone(devices) : undefined;
-    if (phone && !devices.some((d) => d.id === saved)) {
-      saved = phone.id;
+    // The phone app's and browser player's device IDs change; follow them in those modes.
+    const mode = getMode();
+    const followed = mode === 'phone' ? findPhone(devices) : mode === 'browser' ? devices.find((d) => d.id === browserPlayer?.deviceId) : undefined;
+    if (followed) {
+      saved = followed.id;
       localStorage.setItem(DEVICE_KEY, saved!);
     }
     const placeholder = h('option', { value: '', disabled: true }, 'Choose a speaker…');
@@ -123,10 +193,14 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     deviceSelect.value = savedPresent ? saved! : '';
     if (!savedPresent) placeholder.selected = true;
     if (savedPresent) deviceHint.textContent = '';
-    else if (localStorage.getItem(PHONE_KEY))
+    else if (mode === 'phone' && !DESKTOP)
       deviceHint.textContent = 'Spotify isn’t running on this phone. Tap 📱 This phone to open it.';
+    else if (mode === 'browser' && DESKTOP)
+      deviceHint.textContent = 'Click 💻 This browser to play here.';
     else if (!devices.length && restricted.length)
-      deviceHint.textContent = 'Spotify won’t let apps control the speakers it found. Use 📱 This phone and AirPlay or Bluetooth to the speaker.';
+      deviceHint.textContent = DESKTOP
+        ? 'Spotify won’t let apps control the speakers it found. Click 💻 This browser to play here instead.'
+        : 'Spotify won’t let apps control the speakers it found. Use 📱 This phone and AirPlay or Bluetooth to the speaker.';
     else if (!devices.length) deviceHint.textContent = `No speakers found. ${WAKE_HINT}`;
     else if (saved) deviceHint.textContent = `Your last speaker isn’t available. Pick one, or: ${WAKE_HINT}`;
     else deviceHint.textContent = WAKE_HINT;
@@ -189,7 +263,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
 
   root.append(
     settingsPanel,
-    h('div', { class: 'row device' }, deviceSelect, refreshBtn, phoneBtn),
+    h('div', { class: 'row device' }, deviceSelect, refreshBtn, localBtn),
     deviceHint,
     scanSection,
     loadingSection,
@@ -259,7 +333,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     } catch (e) {
       const notFound = e instanceof SpotifyError && e.status === 404;
       if (notFound) loadDevices();
-      const phoneMode = Boolean(localStorage.getItem(PHONE_KEY));
+      const phoneMode = getMode() === 'phone' && !DESKTOP;
       showError(
         notFound && phoneMode ? 'Spotify on this phone went to sleep. Open it, switch back, and scan the card again.' : errorMessage(e),
         notFound && phoneMode,
@@ -298,13 +372,17 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   const initialCard = params.get('c') ? trackIdFromScan(location.href) : null;
   if (params.has('c')) history.replaceState(null, '', '#/play'); // don't replay on reload
   setState(initialCard ? 'loading' : 'scanning');
-  loadDevices().then(() => {
+  const browserReady =
+    DESKTOP && getMode() === 'browser' && hasScopes(...BROWSER_PLAYER_SCOPES) ? startBrowser() : loadDevices();
+  browserReady.then(() => {
     if (initialCard) playCard(initialCard);
     else if (params.has('c')) showError('That link isn’t a valid card.');
   });
 
   return () => {
     document.removeEventListener('visibilitychange', onVisible);
+    document.removeEventListener('pointerdown', unlockSound);
+    browserPlayer?.disconnect();
     scanner.destroy();
   };
 }
