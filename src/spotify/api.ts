@@ -94,6 +94,22 @@ export async function transferPlayback(deviceId: string): Promise<void> {
   });
 }
 
+export interface PlaybackState {
+  progress_ms: number | null;
+  item: { id: string; linked_from?: { id: string } } | null;
+}
+
+/** Current playback, or null when nothing is playing. Used only internally — never shown. */
+export async function getPlaybackState(): Promise<PlaybackState | null> {
+  return call<PlaybackState | null>('/me/player?market=from_token');
+}
+
+export async function seek(positionMs: number, deviceId: string): Promise<void> {
+  await call(`/me/player/seek?position_ms=${Math.round(positionMs)}&device_id=${encodeURIComponent(deviceId)}`, {
+    method: 'PUT',
+  });
+}
+
 export async function pause(deviceId: string): Promise<void> {
   await call(`/me/player/pause?device_id=${encodeURIComponent(deviceId)}`, { method: 'PUT' });
 }

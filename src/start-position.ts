@@ -30,6 +30,26 @@ export function startPositionMs(
   }
 }
 
+/** How far before the wanted start we still accept as "close enough". */
+const SEEK_TOLERANCE_MS = 3_000;
+
+export type SeekCheck = 'wait' | 'ok' | 'seek';
+
+/**
+ * Some Spotify Connect devices ignore the start position in the play request.
+ * Given the reported playback state, decide whether to keep waiting for the card's
+ * track to load, accept the position, or seek explicitly.
+ */
+export function checkStartPosition(
+  state: { progress_ms: number | null; item: { id: string; linked_from?: { id: string } } | null } | null,
+  trackId: string,
+  wantedMs: number,
+): SeekCheck {
+  const item = state?.item;
+  if (!item || (item.id !== trackId && item.linked_from?.id !== trackId) || state.progress_ms == null) return 'wait';
+  return state.progress_ms < wantedMs - SEEK_TOLERANCE_MS ? 'seek' : 'ok';
+}
+
 const STORAGE_KEY = 'startSettings';
 
 export function loadStartSettings(): StartSettings {

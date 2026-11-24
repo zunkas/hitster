@@ -2,9 +2,20 @@ import QrScanner from 'qr-scanner';
 import { GAME_NAME } from '../config';
 import { h, show } from '../dom';
 import { trackIdFromScan } from '../payload';
-import { type Device, getDevices, getTrackDuration, pause, play, resume, SpotifyError, transferPlayback } from '../spotify/api';
+import {
+  type Device,
+  getDevices,
+  getPlaybackState,
+  getTrackDuration,
+  pause,
+  play,
+  resume,
+  seek,
+  SpotifyError,
+  transferPlayback,
+} from '../spotify/api';
 import { isLoggedIn, NotLoggedInError } from '../spotify/auth';
-import { loadStartSettings, saveStartSettings, type StartMode, startPositionMs } from '../start-position';
+import { checkStartPosition, loadStartSettings, saveStartSettings, type StartMode, startPositionMs } from '../start-position';
 import { loginPrompt } from './login-prompt';
 
 const DEVICE_KEY = 'deviceId';
@@ -238,6 +249,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
       paused = false;
       pauseBtn.textContent = '⏸';
       setState('playing');
+      ensureStartPosition(trackId, deviceId, position);
     } catch (e) {
       const notFound = e instanceof SpotifyError && e.status === 404;
       if (notFound) loadDevices();
@@ -246,6 +258,22 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
         notFound && phoneMode ? 'Spotify on this phone went to sleep. Open it, switch back, and scan the card again.' : errorMessage(e),
         notFound && phoneMode,
       );
+    }
+  }
+
+  /** Seek explicitly if the device ignored the start position in the play request. */
+  async function ensureStartPosition(trackId: string, deviceId: string, positionMs: number): Promise<void> {
+    if (positionMs <= 0) return;
+    try {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await new Promise((r) => setTimeout(r, 400));
+        const check = checkStartPosition(await getPlaybackState(), trackId, positionMs);
+        if (check === 'ok') return;
+        if (check === 'seek') break;
+      }
+      await seek(positionMs, deviceId);
+    } catch {
+      // Best effort: the song is already playing, just from an earlier point.
     }
   }
 
