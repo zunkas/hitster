@@ -63,6 +63,11 @@ export interface Device {
   is_restricted: boolean;
 }
 
+export async function getAccountName(): Promise<string> {
+  const me = await call<{ display_name: string | null; id: string }>('/me');
+  return me.display_name || me.id;
+}
+
 /** All devices with an ID, including restricted ones (which reject Web API commands). */
 export async function getDevices(): Promise<Device[]> {
   const res = await call<{ devices: Device[] }>('/me/player/devices');

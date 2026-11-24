@@ -23,12 +23,17 @@ declare global {
   }
 }
 
-/** The SDK only works in desktop browsers (it needs DRM support that mobile browsers lack). */
-export function canPlayInBrowser(): boolean {
+/**
+ * Spotify only supports the SDK in desktop browsers. Android Chrome has the DRM it needs
+ * and may work unofficially ("experimental"); iOS browsers don't.
+ */
+export function browserPlaybackSupport(): 'desktop' | 'experimental' | 'none' {
   const ua = navigator.userAgent;
+  if (!('requestMediaKeySystemAccess' in navigator)) return 'none';
+  if (/Android/i.test(ua)) return 'experimental';
   const iPadAsMac = /Macintosh/.test(ua) && navigator.maxTouchPoints > 1;
-  const mobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua) || iPadAsMac;
-  return !mobile && 'requestMediaKeySystemAccess' in navigator;
+  if (/iPhone|iPad|iPod|Mobile/i.test(ua) || iPadAsMac) return 'none';
+  return 'desktop';
 }
 
 let sdkLoaded: Promise<void> | null = null;

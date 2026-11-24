@@ -4,6 +4,7 @@ import { h, show } from '../dom';
 import { trackIdFromScan } from '../payload';
 import {
   type Device,
+  getAccountName,
   getDevices,
   getPlaybackState,
   getTrackDuration,
@@ -15,7 +16,7 @@ import {
   transferPlayback,
 } from '../spotify/api';
 import { hasScopes, isLoggedIn, login, NotLoggedInError } from '../spotify/auth';
-import { BROWSER_PLAYER_SCOPES, type BrowserPlayer, canPlayInBrowser, startBrowserPlayer } from '../spotify/web-playback';
+import { BROWSER_PLAYER_SCOPES, type BrowserPlayer, browserPlaybackSupport, startBrowserPlayer } from '../spotify/web-playback';
 import { checkStartPosition, loadStartSettings, saveStartSettings, type StartMode, startPositionMs } from '../start-position';
 import { loginPrompt } from './login-prompt';
 
@@ -38,7 +39,9 @@ function setMode(mode: DeviceMode): void {
   localStorage.removeItem('useThisPhone');
 }
 
-const DESKTOP = canPlayInBrowser();
+const BROWSER_SUPPORT = browserPlaybackSupport();
+const DESKTOP = BROWSER_SUPPORT === 'desktop';
+const CAN_PLAY_IN_BROWSER = BROWSER_SUPPORT !== 'none';
 const BROWSER_NAME = `${GAME_NAME} (this browser)`;
 const WAKE_HINT = DESKTOP
   ? 'Not listed? Start something on the speaker from the Spotify app once (or click 💻 This browser), then click ↻.'
@@ -66,9 +69,21 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   const deviceSelect = h('select', { 'aria-label': 'Speaker' });
   const deviceHint = h('p', { class: 'hint' });
   const refreshBtn = h('button', { class: 'icon', title: 'Refresh speakers', onclick: () => loadDevices() }, '↻');
-  const localBtn = DESKTOP
-    ? h('button', { title: 'Play in this browser tab', onclick: () => useThisBrowser() }, '💻 This browser')
+  const phoneBtn = DESKTOP
+    ? null
     : h('button', { title: 'Play through the Spotify app on this phone', onclick: () => useThisPhone() }, '📱 This phone');
+  const browserBtn = CAN_PLAY_IN_BROWSER
+    ? h(
+        'button',
+        { title: 'Play in this browser tab', onclick: () => useThisBrowser() },
+        DESKTOP ? '💻 This browser' : '🌐 This browser (beta)',
+      )
+    : null;
+  const accountLine = h('p', { class: 'hint account' });
+  getAccountName().then(
+    (name) => (accountLine.textContent = `Spotify account: ${name}. Speakers and the Spotify app must use this account.`),
+    () => {},
+  );
   deviceSelect.addEventListener('change', () => {
     localStorage.setItem(DEVICE_KEY, deviceSelect.value);
     const picked = devices.find((d) => d.id === deviceSelect.value);
@@ -143,7 +158,8 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     if (!scanSection.hidden) scanner.start().catch(() => {});
     if (!waitingForSpotifyApp) return;
     for (let attempt = 0; attempt < 4; attempt++) {
-      await loadDevices();
+      deviceHint.textContent = 'Waiting for Spotify on this phone to show up…';
+      await loadDevices(true);
       const phone = findPhone(devices);
       if (phone) {
         waitingForSpotifyApp = false;
@@ -153,12 +169,15 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
       await new Promise((r) => setTimeout(r, 1500));
     }
     waitingForSpotifyApp = false;
-    deviceHint.textContent = `This phone isn’t showing up. In the Spotify app, make sure you’re logged in with the same account, then tap ↻.`;
+    deviceHint.textContent = CAN_PLAY_IN_BROWSER
+      ? 'This phone isn’t showing up in Spotify. Check that the Spotify app uses the account shown below, or try 🌐 This browser (beta).'
+      : 'This phone isn’t showing up in Spotify. Check that the Spotify app uses the account shown below, then tap ↻.';
   }
   document.addEventListener('visibilitychange', onVisible);
 
-  async function loadDevices(): Promise<void> {
-    deviceHint.textContent = 'Looking for speakers…';
+  /** `quiet`: keep the current hint while loading and only show problems (used for retries). */
+  async function loadDevices(quiet = false): Promise<void> {
+    if (!quiet) deviceHint.textContent = 'Looking for speakers…';
     let restricted: Device[];
     try {
       const all = await getDevices();
@@ -192,11 +211,12 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
     const savedPresent = devices.some((d) => d.id === saved);
     deviceSelect.value = savedPresent ? saved! : '';
     if (!savedPresent) placeholder.selected = true;
+    if (quiet && !savedPresent) return;
     if (savedPresent) deviceHint.textContent = '';
     else if (mode === 'phone' && !DESKTOP)
       deviceHint.textContent = 'Spotify isn’t running on this phone. Tap 📱 This phone to open it.';
-    else if (mode === 'browser' && DESKTOP)
-      deviceHint.textContent = 'Click 💻 This browser to play here.';
+    else if (mode === 'browser' && CAN_PLAY_IN_BROWSER)
+      deviceHint.textContent = `${DESKTOP ? 'Click 💻' : 'Tap 🌐'} This browser to play here.`;
     else if (!devices.length && restricted.length)
       deviceHint.textContent = DESKTOP
         ? 'Spotify won’t let apps control the speakers it found. Click 💻 This browser to play here instead.'
@@ -263,8 +283,9 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
 
   root.append(
     settingsPanel,
-    h('div', { class: 'row device' }, deviceSelect, refreshBtn, localBtn),
+    h('div', { class: 'row device' }, deviceSelect, refreshBtn, phoneBtn, browserBtn),
     deviceHint,
+    accountLine,
     scanSection,
     loadingSection,
     playingSection,
@@ -373,7 +394,7 @@ export function playView(root: HTMLElement, params: URLSearchParams): () => void
   if (params.has('c')) history.replaceState(null, '', '#/play'); // don't replay on reload
   setState(initialCard ? 'loading' : 'scanning');
   const browserReady =
-    DESKTOP && getMode() === 'browser' && hasScopes(...BROWSER_PLAYER_SCOPES) ? startBrowser() : loadDevices();
+    CAN_PLAY_IN_BROWSER && getMode() === 'browser' && hasScopes(...BROWSER_PLAYER_SCOPES) ? startBrowser() : loadDevices();
   browserReady.then(() => {
     if (initialCard) playCard(initialCard);
     else if (params.has('c')) showError('That link isn’t a valid card.');
