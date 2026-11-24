@@ -41,7 +41,7 @@ button:disabled { opacity: 0.5; cursor: default; }
 .panel.error { border: 1px solid var(--accent); }
 .hint, .status { color: var(--muted); font-size: 0.95rem; }
 .settings legend { font-weight: 600; padding: 0; margin-bottom: 0.5rem; float: left; width: 100%; }
-.radio { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; }
+.radio { display: flex; align-items: center; gap: 0.5rem; padding: 0.4rem 0; clear: both; }
 .radio input[type='number'] { width: 5rem; padding: 0.3rem 0.5rem; }
 
 .viewfinder { position: relative; aspect-ratio: 1; border-radius: 1rem; overflow: hidden; background: #000; }
